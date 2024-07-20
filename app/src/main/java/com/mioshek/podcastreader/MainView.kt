@@ -1,5 +1,6 @@
 package com.mioshek.podcastreader
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -139,6 +140,10 @@ fun MainView(
 
     if (showCreateView) {
         CreatorWindow(lyricsViewModel = lyricsViewModel, { showCreateView = false })
+    }
+
+    Box(modifier = modifier.fillMaxSize().padding(60.dp), contentAlignment = Alignment.BottomCenter){
+        Text(text = "${lyricsUiState.selectedPage}/${lyricsUiState.loadedLyrics.size}")
     }
 }
 
