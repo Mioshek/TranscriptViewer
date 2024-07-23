@@ -1,9 +1,11 @@
 package com.mioshek.podcastreader
 
+import android.util.Log
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -35,6 +37,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,7 +47,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.MultiParagraph
+import androidx.compose.ui.text.TextLayoutInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
@@ -65,6 +75,7 @@ fun MainView(
 ) {
     val lyricsUiState by lyricsViewModel.lyrics.collectAsState()
     var showCreateView by remember { mutableStateOf(false) }
+    var maxCharacters by remember{ mutableIntStateOf(0) }
 
     Column(
         modifier = modifier
@@ -96,12 +107,14 @@ fun MainView(
                 .padding(start = 10.dp, end = 10.dp),
             contentAlignment = Alignment.TopCenter
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-            ) {
-                Text(text = lyricsUiState.displayedLyrics)
+            BoxWithConstraints(modifier = modifier.fillMaxSize()){
+                val widthDp = constraints.maxWidth
+                val heightDp = constraints.maxHeight
+
+                Text(
+                    text = lyricsUiState.displayedLyrics,
+                    modifier.fillMaxSize(),
+                )
             }
             Box(modifier = modifier.fillMaxSize()){
                 Row(modifier = modifier.fillMaxSize()) {
@@ -142,8 +155,10 @@ fun MainView(
         CreatorWindow(lyricsViewModel = lyricsViewModel, { showCreateView = false })
     }
 
-    Box(modifier = modifier.fillMaxSize().padding(60.dp), contentAlignment = Alignment.BottomCenter){
-        Text(text = "${lyricsUiState.selectedPage}/${lyricsUiState.loadedLyrics.size}")
+    Box(modifier = modifier
+        .fillMaxSize()
+        .padding(60.dp), contentAlignment = Alignment.BottomCenter){
+        Text(text = "${lyricsUiState.selectedPage + 1}/${lyricsUiState.loadedLyrics.size}")
     }
 }
 
@@ -306,6 +321,7 @@ fun GreetingPreview() {
 data class LyricsUiState(
     val id: Int = 0,
     val name: String = "",
+    val rawLyrics: String = "",
     val loadedLyrics: Array<String> = arrayOf(""),
     val displayedLyrics: String = "",
     val selectedPage: Int = 0
@@ -329,7 +345,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                     selectedPage = currentState.selectedPage + 1
                 )
             }
-            val updatedPageLyrics = Lyrics(_lyrics.value.id, _lyrics.value.name,mergeChunks(_lyrics.value.loadedLyrics), _lyrics.value.selectedPage)
+            val updatedPageLyrics = Lyrics(_lyrics.value.id, _lyrics.value.name, _lyrics.value.rawLyrics, _lyrics.value.selectedPage)
             viewModelScope.launch {
                 repository.upsert(updatedPageLyrics)
             }
@@ -346,7 +362,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                     selectedPage = currentState.selectedPage - 1
                 )
             }
-            val updatedPageLyrics = Lyrics(_lyrics.value.id, _lyrics.value.name,mergeChunks(_lyrics.value.loadedLyrics), _lyrics.value.selectedPage)
+            val updatedPageLyrics = Lyrics(_lyrics.value.id, _lyrics.value.name,_lyrics.value.rawLyrics, _lyrics.value.selectedPage)
             viewModelScope.launch {
                 repository.upsert(updatedPageLyrics)
             }
@@ -366,6 +382,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                 LyricsUiState(
                     id = inserted.id,
                     name = inserted.name,
+                    rawLyrics = inserted.content,
                     loadedLyrics = splitStringIntoChunks(inserted.content),
                     selectedPage = inserted.lastSelectedPage
                 )
@@ -386,6 +403,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
             currentState.copy(
                 newLyrics.id,
                 newLyrics.name,
+                newLyrics.rawLyrics,
                 newLyrics.loadedLyrics,
                 newLyrics.loadedLyrics[newLyrics.selectedPage],
                 newLyrics.selectedPage
@@ -401,6 +419,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                     LyricsUiState(
                         id = it.id,
                         name = it.name,
+                        rawLyrics = it.content,
                         loadedLyrics = splitStringIntoChunks(it.content),
                         selectedPage = it.lastSelectedPage
                     )
@@ -410,7 +429,8 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
     }
 
     private fun splitStringIntoChunks(input: String, chunkSize: Int = 10): Array<String> {
-        val lines = input.split("\n")
+        val regex = "(?<=[!.?])\\s+"
+        val lines = input.trimIndent().split(Regex(regex))
         val chunks = mutableListOf<String>()
         val chunk = StringBuilder()
 
@@ -420,15 +440,11 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                 chunks.add(chunk.toString())
                 chunk.clear()
             } else {
-                chunk.append("\n")
+                chunk.append(" ")
             }
         }
 
         return chunks.toTypedArray()
-    }
-
-    private fun mergeChunks(chunks: Array<String>): String {
-        return chunks.joinToString(separator = "\n")
     }
 
 }
