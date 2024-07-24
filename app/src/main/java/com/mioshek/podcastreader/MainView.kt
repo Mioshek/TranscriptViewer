@@ -1,7 +1,6 @@
 package com.mioshek.podcastreader
 
 import android.util.Log
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,9 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -37,30 +33,27 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.MultiParagraph
-import androidx.compose.ui.text.TextLayoutInput
-import androidx.compose.ui.text.TextLayoutResult
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mioshek.podcastreader.ui.theme.PodcastReaderTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -75,7 +68,8 @@ fun MainView(
 ) {
     val lyricsUiState by lyricsViewModel.lyrics.collectAsState()
     var showCreateView by remember { mutableStateOf(false) }
-    var maxCharacters by remember{ mutableIntStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
     Column(
         modifier = modifier
@@ -96,45 +90,51 @@ fun MainView(
                 onItemSelected = {
                     lyricsViewModel.changeLyrics(it)
                     selectedIndex = it
+                    coroutineScope.launch {
+                        delay(500)
+                        listState.scrollToItem(0, lyricsUiState.selectedPage)
+                    }
                 },
             )
         }
 
-        Box(
+        LaunchedEffect(null){
+
+            coroutineScope.launch {
+                while (true){
+                    delay(10_000)
+                    if (lyricsUiState.id != 0){
+                        lyricsViewModel.changeScrollState(listState.firstVisibleItemScrollOffset)
+                        Log.d("Saved ScrollState", "${listState.firstVisibleItemScrollOffset}")
+                    }
+                    else{
+                        Log.d("Saved ScrollState", "Not Picked")
+                    }
+                }
+            }
+        }
+
+        BoxWithConstraints(
             modifier = modifier
                 .fillMaxWidth()
                 .weight(0.8f)
                 .padding(start = 10.dp, end = 10.dp),
             contentAlignment = Alignment.TopCenter
         ) {
-            BoxWithConstraints(modifier = modifier.fillMaxSize()){
-                val widthDp = constraints.maxWidth
-                val heightDp = constraints.maxHeight
+            val width = constraints.maxWidth
+            val height = constraints.maxHeight
 
-                Text(
-                    text = lyricsUiState.displayedLyrics,
-                    modifier.fillMaxSize(),
-                )
-            }
-            Box(modifier = modifier.fillMaxSize()){
-                Row(modifier = modifier.fillMaxSize()) {
-                    Box(modifier = modifier
-                        .fillMaxHeight()
-                        .weight(0.5f)
-                        .clickable {
-                            lyricsViewModel.showPreviousPage()
-                        }
-                    )
-
-                    Box(modifier = modifier
-                        .fillMaxHeight()
-                        .weight(0.5f)
-                        .clickable {
-                            lyricsViewModel.showNextPage()
-                        }
+            LazyColumn(
+                state = listState
+            ){
+                item {
+                    Text(
+                        text = lyricsUiState.lyrics,
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily(Font(R.font.jetbrainsmonomediu)),
+                        modifier = modifier.fillMaxSize(),
                     )
                 }
-
             }
         }
 
@@ -158,7 +158,7 @@ fun MainView(
     Box(modifier = modifier
         .fillMaxSize()
         .padding(60.dp), contentAlignment = Alignment.BottomCenter){
-        Text(text = "${lyricsUiState.selectedPage + 1}/${lyricsUiState.loadedLyrics.size}")
+        Text(text = "${listState.firstVisibleItemScrollOffset}/${listState.layoutInfo.totalItemsCount * listState.layoutInfo.viewportSize.height}")
     }
 }
 
@@ -321,9 +321,7 @@ fun GreetingPreview() {
 data class LyricsUiState(
     val id: Int = 0,
     val name: String = "",
-    val rawLyrics: String = "",
-    val loadedLyrics: Array<String> = arrayOf(""),
-    val displayedLyrics: String = "",
+    val lyrics: String = "",
     val selectedPage: Int = 0
 )
 
@@ -335,38 +333,6 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
 
     init {
         getAllLyrics()
-    }
-
-    fun showNextPage(){
-        if (_lyrics.value.selectedPage < _lyrics.value.loadedLyrics.size -1){
-            _lyrics.update {currentState ->
-                currentState.copy(
-                    displayedLyrics = currentState.loadedLyrics[currentState.selectedPage + 1],
-                    selectedPage = currentState.selectedPage + 1
-                )
-            }
-            val updatedPageLyrics = Lyrics(_lyrics.value.id, _lyrics.value.name, _lyrics.value.rawLyrics, _lyrics.value.selectedPage)
-            viewModelScope.launch {
-                repository.upsert(updatedPageLyrics)
-            }
-        }
-    }
-
-    fun clear() = _lyrics.update { LyricsUiState()}
-
-    fun showPreviousPage(){
-        if (_lyrics.value.selectedPage > 0){
-            _lyrics.update {currentState ->
-                currentState.copy(
-                    displayedLyrics = currentState.loadedLyrics[currentState.selectedPage - 1],
-                    selectedPage = currentState.selectedPage - 1
-                )
-            }
-            val updatedPageLyrics = Lyrics(_lyrics.value.id, _lyrics.value.name,_lyrics.value.rawLyrics, _lyrics.value.selectedPage)
-            viewModelScope.launch {
-                repository.upsert(updatedPageLyrics)
-            }
-        }
     }
 
     fun create(lyrics: Lyrics) {
@@ -382,8 +348,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                 LyricsUiState(
                     id = inserted.id,
                     name = inserted.name,
-                    rawLyrics = inserted.content,
-                    loadedLyrics = splitStringIntoChunks(inserted.content),
+                    lyrics = inserted.content,
                     selectedPage = inserted.lastSelectedPage
                 )
             )
@@ -397,15 +362,31 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
         }
     }
 
+    fun changeScrollState(scrollState: Int){
+        _lyrics.update {
+            it.copy(
+                selectedPage = scrollState
+            )
+        }
+        viewModelScope.launch{
+            repository.upsert(
+                Lyrics(
+                    id = _lyrics.value.id,
+                    name = _lyrics.value.name,
+                    content = _lyrics.value.lyrics,
+                    lastSelectedPage = _lyrics.value.selectedPage
+                )
+            )
+        }
+    }
+
     fun changeLyrics(id: Int){
         _lyrics.update {currentState ->
             val newLyrics = _lyricsList[id]
             currentState.copy(
                 newLyrics.id,
                 newLyrics.name,
-                newLyrics.rawLyrics,
-                newLyrics.loadedLyrics,
-                newLyrics.loadedLyrics[newLyrics.selectedPage],
+                newLyrics.lyrics,
                 newLyrics.selectedPage
             )
         }
@@ -419,32 +400,11 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                     LyricsUiState(
                         id = it.id,
                         name = it.name,
-                        rawLyrics = it.content,
-                        loadedLyrics = splitStringIntoChunks(it.content),
+                        lyrics = it.content,
                         selectedPage = it.lastSelectedPage
                     )
                 )
             }
         }
     }
-
-    private fun splitStringIntoChunks(input: String, chunkSize: Int = 10): Array<String> {
-        val regex = "(?<=[!.?])\\s+"
-        val lines = input.trimIndent().split(Regex(regex))
-        val chunks = mutableListOf<String>()
-        val chunk = StringBuilder()
-
-        for (i in lines.indices) {
-            chunk.append(lines[i])
-            if ((i + 1) % chunkSize == 0 || i == lines.size - 1) {
-                chunks.add(chunk.toString())
-                chunk.clear()
-            } else {
-                chunk.append(" ")
-            }
-        }
-
-        return chunks.toTypedArray()
-    }
-
 }
