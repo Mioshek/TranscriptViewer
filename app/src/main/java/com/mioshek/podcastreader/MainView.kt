@@ -33,6 +33,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +71,7 @@ fun MainView(
     var showCreateView by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
+    var currentlySelectedEpisode by remember{ mutableIntStateOf(1) }
 
     Column(
         modifier = modifier
@@ -77,7 +79,7 @@ fun MainView(
             .blur(if (showCreateView) 8.dp else 0.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        var selectedIndex by remember { mutableStateOf(-1) }
+        var selectedIndex by remember { mutableIntStateOf(-1) }
         Box(
             modifier = modifier
                 .fillMaxWidth()
@@ -92,7 +94,7 @@ fun MainView(
                     selectedIndex = it
                     coroutineScope.launch {
                         delay(500)
-                        listState.scrollToItem(0, lyricsUiState.selectedPage)
+                        listState.animateScrollToItem(lyricsUiState.selectedPage -1, 0)
                     }
                 },
             )
@@ -104,7 +106,7 @@ fun MainView(
                 while (true){
                     delay(10_000)
                     if (lyricsUiState.id != 0){
-                        lyricsViewModel.changeScrollState(listState.firstVisibleItemScrollOffset)
+                        lyricsViewModel.changeScrollState(currentlySelectedEpisode)
                         Log.d("Saved ScrollState", "${listState.firstVisibleItemScrollOffset}")
                     }
                     else{
@@ -114,22 +116,29 @@ fun MainView(
             }
         }
 
-        BoxWithConstraints(
+        Box(
             modifier = modifier
                 .fillMaxWidth()
                 .weight(0.8f)
                 .padding(start = 10.dp, end = 10.dp),
             contentAlignment = Alignment.TopCenter
         ) {
-            val width = constraints.maxWidth
-            val height = constraints.maxHeight
-
             LazyColumn(
                 state = listState
             ){
-                item {
+//                item {
+//                    Text(
+//                        text = lyricsUiState.lyrics,
+//                        fontSize = 14.sp,
+//                        fontFamily = FontFamily(Font(R.font.jetbrainsmonomediu)),
+//                        modifier = modifier.fillMaxSize(),
+//                    )
+//                }
+                items(lyricsUiState.loadedLyrics.size){
+                    currentlySelectedEpisode = listState.firstVisibleItemIndex + 1
+
                     Text(
-                        text = lyricsUiState.lyrics,
+                        text = lyricsUiState.loadedLyrics[it],
                         fontSize = 14.sp,
                         fontFamily = FontFamily(Font(R.font.jetbrainsmonomediu)),
                         modifier = modifier.fillMaxSize(),
@@ -158,7 +167,7 @@ fun MainView(
     Box(modifier = modifier
         .fillMaxSize()
         .padding(60.dp), contentAlignment = Alignment.BottomCenter){
-        Text(text = "${listState.firstVisibleItemScrollOffset}/${listState.layoutInfo.totalItemsCount * listState.layoutInfo.viewportSize.height}")
+        Text(text = "Page: $currentlySelectedEpisode")
     }
 }
 
@@ -322,6 +331,7 @@ data class LyricsUiState(
     val id: Int = 0,
     val name: String = "",
     val lyrics: String = "",
+    val loadedLyrics: Array<String> = arrayOf(""),
     val selectedPage: Int = 0
 )
 
@@ -387,6 +397,7 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                 newLyrics.id,
                 newLyrics.name,
                 newLyrics.lyrics,
+                splitIntoEpisodes(newLyrics.lyrics),
                 newLyrics.selectedPage
             )
         }
@@ -401,10 +412,20 @@ class LyricsViewModel(private val repository: LyricsRepository): ViewModel(){
                         id = it.id,
                         name = it.name,
                         lyrics = it.content,
+                        loadedLyrics = splitIntoEpisodes(it.content),
                         selectedPage = it.lastSelectedPage
                     )
                 )
             }
         }
+    }
+
+    private fun splitIntoEpisodes(lyrics: String): Array<String> {
+        val regex = Regex("(episodio \\d+)")
+        val episodes = lyrics.replace("\\n", " ").replace("\\r", " ").split(regex).mapIndexed{ index, part ->
+            if(index == 0) part
+            else regex.findAll(lyrics).toList()[index - 1].value + part
+        }
+        return episodes.toTypedArray()
     }
 }
